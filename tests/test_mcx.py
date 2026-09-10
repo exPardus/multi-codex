@@ -88,7 +88,8 @@ class Workers(unittest.TestCase):
         child = int((self.jobs / worker / 'child-pid').read_text())
         result = self.run_mcx('steer', worker, 'new direction')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.await_result(worker).stdout, 'new direction\n')
+        result = self.await_result(worker)
+        self.assertEqual((result.returncode, result.stdout), (0, 'new direction\n'), result.stderr)
         after = json.loads((self.jobs / worker / 'invocation.json').read_text())
         self.assertEqual(before['session'], after['session'])
         self.assertIn('resume', after['args'])
@@ -186,6 +187,21 @@ class Workers(unittest.TestCase):
             result = self.run_mcx(*args, env=env)
             self.assertEqual(result.returncode, 1)
             self.assertIn('inspection denied', result.stderr)
+
+    def test_result_when_worker_finishes_during_process_inspection(self):
+        worker = self.spawn()
+        self.await_result(worker)
+        state = self.jobs / worker / 'state'
+        state.write_text('running\n')
+        bindir = self.cwd / 'racing-bin'
+        bindir.mkdir()
+        stub = bindir / 'ps'
+        stub.write_text('#!/bin/sh\nprintf "done\\n" > "$MCX_TEST_STATE"\nexit 1\n')
+        stub.chmod(0o755)
+        env = dict(self.env, PATH=str(bindir) + os.pathsep + self.env['PATH'],
+                   MCX_TEST_STATE=str(state))
+        result = self.run_mcx('result', worker, env=env)
+        self.assertEqual((result.returncode, result.stdout), (0, 'hello\n'), result.stderr)
 
     def test_invalid_input(self):
         for args in [('spawn', ''), ('spawn', '-m'), ('spawn', '-r', 'ultra', 'task'),
