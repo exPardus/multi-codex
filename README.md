@@ -297,6 +297,10 @@ steering, startup context in both apps, and recursion prevention.
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project conventions and
 [CHANGELOG.md](CHANGELOG.md) for changes.
 
+## License
+
+[MIT](LICENSE) © 2026 exPardus LLP.
+
 ---
 
 <p align="center">
