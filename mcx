@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# Tiny background Codex workers. Bash 3.2+; no packages or daemon.
+set -eu
+umask 077
+self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+
+fail() { printf 'mcx: %s\n' "$*" >&2; exit 1; }
+usage() {
+    cat <<'EOF'
+mcx spawn [-m MODEL] [-r EFFORT] "instructions"
+                             Start a fresh background worker; print its ID.
+mcx spawn -                  Read instructions from stdin.
+mcx list                     List local workers and their states.
+mcx result ID                Print the final answer (exit 2 if still running).
+mcx stop ID                  Stop a worker and its child processes.
+mcx steer ID "instructions"  Interrupt and resume that worker with new input.
+mcx steer ID -               Read new instructions from stdin.
+
+Requires Bash and an authenticated Codex CLI. State: $MCX_DIR or ./.mcx
+Default model: gpt-5.6-luna (MCX_MODEL). Reasoning: medium (MCX_EFFORT).
+EOF
+}
+
+# Also used as a global Codex SessionStart hook; plain stdout becomes context.
+if [[ ${1:-} == _context ]]; then
+    if [[ ${MCX_WORKER:-0} == 1 ]]; then
+        cat <<'EOF'
+You are an mcx WORKER, not a coordinator. Complete the supplied task yourself.
+Do not delegate, spawn subagents, launch Codex/Claude sessions, or use mcx spawn
+or steer. Do not unset or override MCX_WORKER. If the task is too large or blocked,
+report that to the parent in your final answer. Return your result and finish;
+do not wait for more work. These rules also apply after resume or compaction.
+EOF
+    else
+        cat <<EOF
+The lightweight multi-codex helper is available at: $self
+Use shell commands for user-authorized, independent background Codex tasks:
+  "$self" spawn [-m MODEL] [-r EFFORT] "complete task and context"
+  "$self" list | result ID | stop ID | steer ID "new instruction"
+Each spawn starts fresh in the current directory; provide all needed context.
+Keep using the same directory or an absolute MCX_DIR to find its jobs. Workers
+exit after finishing. Read results explicitly. Steer interrupts and resumes the
+same worker. Assign disjoint files when workers share a directory.
+Default Luna/medium suits small, clearly scoped tasks. Choose gpt-5.6-terra for
+harder coding, gpt-5.6-sol for complex work, and gpt-6-astra only when the user
+specifically requests it. Never inherit an expensive coordinator model blindly.
+Workers must not delegate or launch more sessions; MCX_WORKER=1 marks a worker.
+EOF
+    fi
+    exit 0
+fi
+
+state() {
+    printf '%s\n' "$1" > "$job/state.$$"
+    mv "$job/state.$$" "$job/state"
+}
+
+# Match the process group leader to this job before sending any signals.
+alive() {
+    local group command inspection
+    pid=$(cat "$job/pid" 2>/dev/null) || return 1
+    [[ $pid =~ ^[0-9]+$ && $pid -gt 1 ]] || return 1
+    if ! inspection=$(ps -p "$pid" -o pgid= -o args= 2>&1); then
+        [[ -z $inspection ]] && return 1
+        return 2 # Inspection denied is different from a dead worker.
+    fi
+    read -r group command <<< "$inspection"
+    [[ $group == "$pid" && $command == *" _run $job" ]]
+}
+
+status() {
+    local current
+    current=$(cat "$job/state" 2>/dev/null) || current=starting
+    case "$current" in
+        starting|running)
+            if [[ -f $job/pid ]]; then
+                if alive; then :; elif [[ $? == 1 ]]; then current=lost; fi
+            fi ;;
+    esac
+    printf '%s\n' "$current"
+}
+
+stop_worker() {
+    local i
+    if alive; then
+        kill -TERM -- "-$pid" 2>/dev/null || fail 'could not signal worker process group'
+        for ((i=0; i<30; i++)); do
+            kill -0 -- "-$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -KILL -- "-$pid" 2>/dev/null || :
+        state stopped
+    elif [[ $? == 2 ]]; then
+        fail 'process inspection denied; stop/steer requires a shell allowed to inspect processes'
+    fi
+}
+
+read_prompt() {
+    if [[ $1 == - ]]; then cat; else printf '%s\n' "$1"; fi
+}
+
+launch() {
+    rm -f "$job/result" "$job/exit-code"
+    : > "$job/events.jsonl"
+    state starting
+    # Job control gives the whole worker a separate process group, even without
+    # a terminal. The new Bash starts with job control off, keeping its children
+    # in that group. nohup and redirected descriptors detach it from the caller.
+    set -m
+    nohup bash "$self" _run "$job" </dev/null >"$job/log" 2>&1 &
+    printf '%s\n' "$!" > "$job/pid"
+    printf '%s\n' "${job##*/}"
+}
+
+# Internal worker: just one Codex process and a shell to record its exit status.
+if [[ ${1:-} == _run ]]; then
+    job=$2
+    final=
+    # shellcheck disable=SC2329 # Called by the EXIT trap.
+    finish() {
+        local rc=$?
+        printf '%s\n' "$rc" > "$job/exit-code"
+        if [[ -z $final ]]; then
+            if [[ $rc == 0 ]]; then final='done'; else final=failed; fi
+        fi
+        state "$final"
+    }
+    trap finish EXIT
+    trap 'final=stopped; exit 143' TERM INT
+    cd "$(cat "$job/cwd")"
+    unset CODEX_THREAD_ID
+    export MCX_WORKER=1
+    args=(-a never --disable multi_agent --disable multi_agent_v2
+          -c 'shell_environment_policy.set.MCX_WORKER="1"'
+          exec -m "$(cat "$job/model")"
+          -c "model_reasoning_effort=\"$(cat "$job/effort")\""
+          --sandbox workspace-write --skip-git-repo-check
+          --json -o "$job/result")
+    if [[ -s $job/session ]]; then args+=(resume "$(cat "$job/session")"); fi
+    # Keep worker rules present even before the optional global hook is installed.
+    { "$self" _context; printf '\nTask from parent:\n'; cat "$job/prompt"; } > "$job/input"
+    state running
+    "$(cat "$job/codex")" "${args[@]}" - <"$job/input" >"$job/events.jsonl"
+    exit 0
+fi
+
+if [[ ${MCX_WORKER:-0} == 1 && ( ${1:-} == spawn || ${1:-} == steer ) ]]; then
+    fail 'workers cannot launch or steer workers; return the request to your parent'
+fi
+
+model=${MCX_MODEL:-gpt-5.6-luna}
+effort=${MCX_EFFORT:-medium}
+if [[ ${1:-} == spawn ]]; then
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -m|--model) [[ $# -ge 2 ]] || fail 'missing model'; model=$2; shift 2 ;;
+            -r|--reasoning) [[ $# -ge 2 ]] || fail 'missing reasoning effort'; effort=$2; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    [[ -n $model && $model != -* ]] || fail 'invalid model'
+    case "$effort" in none|low|medium|high|xhigh|max) ;; *) fail 'invalid reasoning effort' ;; esac
+    set -- spawn "$@"
+fi
+
+case "${1:-}" in
+    -h|--help|help|'') usage; exit 0 ;;
+    spawn) [[ $# == 2 ]] || fail 'usage: mcx spawn "instructions" (or - for stdin)' ;;
+    list) [[ $# == 1 ]] || fail 'usage: mcx list' ;;
+    result|stop) [[ $# == 2 ]] || fail "usage: mcx $1 ID" ;;
+    steer) [[ $# == 3 ]] || fail 'usage: mcx steer ID "instructions" (or - for stdin)' ;;
+    *) fail "unknown command: $1 (try --help)" ;;
+esac
+
+root=${MCX_DIR:-$PWD/.mcx}
+mkdir -p "$root"
+root=$(cd "$root" && pwd)
+
+case "$1" in
+    spawn)
+        codex=$(command -v "${CODEX_BIN:-codex}") || fail 'codex is not installed or not on PATH'
+        [[ -f $codex && -x $codex ]] || fail 'CODEX_BIN must be an executable file'
+        codex=$(cd "$(dirname "$codex")" && pwd)/$(basename "$codex")
+        prompt=$(read_prompt "$2")
+        [[ -n $prompt ]] || fail 'instructions must not be empty'
+        job=$(mktemp -d "$root/XXXXXXXX")
+        printf '%s\n' "$PWD" > "$job/cwd"
+        printf '%s\n' "$codex" > "$job/codex"
+        printf '%s\n' "$model" > "$job/model"
+        printf '%s\n' "$effort" > "$job/effort"
+        printf '%s\n' "$prompt" > "$job/prompt"
+        launch
+        ;;
+    list)
+        printf 'ID\tSTATE\tMODEL\tEFFORT\tTASK\n'
+        for job in "$root"/*; do
+            [[ -f $job/prompt ]] || continue
+            printf '%s\t%s\t%s\t%s\t%s\n' "${job##*/}" "$(status)" "$(cat "$job/model")" "$(cat "$job/effort")" "$(head -n 1 "$job/prompt" | cut -c 1-80)"
+        done
+        ;;
+    *)
+        [[ $2 =~ ^[A-Za-z0-9]{8}$ ]] || fail 'invalid worker ID'
+        job=$root/$2
+        [[ -d $job ]] || fail "unknown worker: $2"
+        if [[ $1 == result ]]; then
+            current=$(status)
+            case "$current" in
+                starting|running) printf 'mcx: %s is %s\n' "$2" "$current" >&2; exit 2 ;;
+                done) [[ -f $job/result ]] || fail "missing result; see $job/log"
+                      cat "$job/result" ;;
+                *) fail "$2 is $current; see $job/log and $job/events.jsonl" ;;
+            esac
+            exit 0
+        fi
+        mkdir "$job/lock" 2>/dev/null || fail 'another stop/steer is in progress; try again'
+        trap 'rmdir "$job/lock"' EXIT
+        if [[ $1 == stop ]]; then
+            stop_worker
+            printf '%s\n' "$(status)"
+        else
+            prompt=$(read_prompt "$3")
+            [[ -n $prompt ]] || fail 'instructions must not be empty'
+            # Read only the machine event, never infer an ID from assistant text.
+            session=$(sed -n '/"type"[[:space:]]*:[[:space:]]*"thread.started"/s/.*"thread_id"[[:space:]]*:[[:space:]]*"\([a-f0-9-]*\)".*/\1/p' "$job/events.jsonl" | head -n 1)
+            [[ -n $session ]] || session=$(cat "$job/session" 2>/dev/null) || :
+            [[ -n $session ]] || fail 'worker has not opened a session yet; try again shortly'
+            stop_worker
+            printf '%s\n' "$session" > "$job/session"
+            printf '%s\n' "$prompt" > "$job/prompt"
+            launch
+        fi
+        ;;
+esac

@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Offline Codex stand-in for process and CLI integration tests."""
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+args = sys.argv[1:]
+result = Path(args[args.index('-o') + 1])
+prompt = sys.stdin.read()
+task = prompt.split('Task from parent:\n', 1)[-1].strip()
+session = args[args.index('resume') + 1] if 'resume' in args else str(uuid.uuid4())
+job = result.parent
+(job / 'invocation.json').write_text(json.dumps({
+    'args': args, 'prompt': prompt, 'session': session, 'cwd': os.getcwd(),
+    'worker': os.environ.get('MCX_WORKER'), 'thread': os.environ.get('CODEX_THREAD_ID'),
+}))
+print(json.dumps({'type': 'thread.started', 'thread_id': session}), flush=True)
+if task == 'fail':
+    print('intentional failure', file=sys.stderr)
+    sys.exit(7)
+if task == 'hold':
+    # A child which ignores TERM must still be removed by mcx stop.
+    child = subprocess.Popen([sys.executable, '-c',
+        'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(90)'])
+    (job / 'child-pid').write_text(str(child.pid))
+    time.sleep(90)
+if task.startswith('delay:'):
+    time.sleep(float(task.split(':')[1]))
+result.write_text(task + '\n')
+print(json.dumps({'type': 'turn.completed'}), flush=True)
