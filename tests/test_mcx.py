@@ -78,7 +78,11 @@ class Workers(unittest.TestCase):
         self.assertIn('You are an mcx WORKER', record['prompt'])
         self.assertIn('gpt-5.6-luna', record['args'])
         self.assertIn('model_reasoning_effort="medium"', record['args'])
-        self.assertIn('multi_agent', record['args'])
+        self.assertIn('agents.enabled=true', record['args'])
+        self.assertIn(('--enable', 'multi_agent'), list(zip(record['args'], record['args'][1:])))
+        self.assertNotIn('--disable', record['args'])
+        self.assertIn('agents.default_subagent_model=gpt-5.6-luna', record['args'])
+        self.assertIn('agents.default_subagent_reasoning_effort=medium', record['args'])
         self.assertIn('shell_environment_policy.set.MCX_WORKER="1"', record['args'])
 
     def test_steer_preserves_session_and_model(self):
@@ -95,6 +99,9 @@ class Workers(unittest.TestCase):
         self.assertIn('resume', after['args'])
         self.assertIn('gpt-5.6-terra', after['args'])
         self.assertIn('model_reasoning_effort="low"', after['args'])
+        self.assertIn('agents.enabled=true', after['args'])
+        self.assertIn('agents.default_subagent_model=gpt-5.6-terra', after['args'])
+        self.assertIn('agents.default_subagent_reasoning_effort=low', after['args'])
         self.assertFalse(self.process_running(child))
 
     def test_steer_completed_worker(self):
@@ -158,6 +165,9 @@ class Workers(unittest.TestCase):
         self.assertIn('multi-codex helper is available as:', normal.stdout)
         self.assertIn('Default Luna/medium', normal.stdout)
         self.assertIn('WORKER, not a coordinator', worker.stdout)
+        self.assertIn('may spawn native Codex subagents', worker.stdout)
+        self.assertIn('Do not launch independent worker sessions', worker.stdout)
+        self.assertIn('Your subagents must follow the same restriction', worker.stdout)
         self.assertNotIn('Default Luna/medium', worker.stdout)
 
     def test_stale_pid_does_not_kill_unrelated_process(self):

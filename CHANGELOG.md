@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow workers to use native Codex subagents while blocking independent worker
+  launches. Native subagents default to the worker's model and reasoning effort.
 - Install `mcx` and `multicodex` on PATH alongside the Codex startup hook.
 - Preserve unrelated commands and hooks, including handlers in a shared group.
 - Prefer the short `mcx` command in coordinator startup instructions.

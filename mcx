@@ -25,11 +25,14 @@ EOF
 if [[ ${1:-} == _context ]]; then
     if [[ ${MCX_WORKER:-0} == 1 ]]; then
         cat <<'EOF'
-You are an mcx WORKER, not a coordinator. Complete the supplied task yourself.
-Do not delegate, spawn subagents, launch Codex/Claude sessions, or use mcx spawn
-or steer. Do not unset or override MCX_WORKER. If the task is too large or blocked,
-report that to the parent in your final answer. Return your result and finish;
-do not wait for more work. These rules also apply after resume or compaction.
+You are an mcx WORKER, not a coordinator. Complete the supplied task.
+You may spawn native Codex subagents to help with this task. Prefer your worker's
+model and reasoning settings for them; use Astra only if the user requests it.
+Do not launch independent worker sessions through mcx spawn, mcx steer, or direct
+Codex/Claude CLI launches. Your subagents must follow the same restriction.
+Do not unset or override MCX_WORKER. Collect your subagents' results and close
+them before returning your final answer. Report blockers to the parent, then
+finish; do not wait for more work. These rules also apply after resume or compaction.
 EOF
     else
         launcher=mcx
@@ -49,7 +52,8 @@ same worker. Assign disjoint files when workers share a directory.
 Default Luna/medium suits small, clearly scoped tasks. Choose gpt-5.6-terra for
 harder coding, gpt-5.6-sol for complex work, and gpt-6-astra only when the user
 specifically requests it. Never inherit an expensive coordinator model blindly.
-Workers must not delegate or launch more sessions; MCX_WORKER=1 marks a worker.
+Workers may use native Codex subagents, but workers and their subagents must not
+launch independent workers. MCX_WORKER=1 marks a worker and remains set in its tools.
 EOF
     fi
     exit 0
@@ -139,7 +143,9 @@ if [[ ${1:-} == _run ]]; then
     cd "$(cat "$job/cwd")"
     unset CODEX_THREAD_ID
     export MCX_WORKER=1
-    args=(-a never --disable multi_agent --disable multi_agent_v2
+    args=(-a never --enable multi_agent -c agents.enabled=true
+          -c "agents.default_subagent_model=$(cat "$job/model")"
+          -c "agents.default_subagent_reasoning_effort=$(cat "$job/effort")"
           -c 'shell_environment_policy.set.MCX_WORKER="1"'
           exec -m "$(cat "$job/model")"
           -c "model_reasoning_effort=\"$(cat "$job/effort")\""

@@ -23,7 +23,9 @@ executable and makes no model calls. GitHub Actions runs it on Linux and macOS.
   Codex/project instructions.
 - An immediate ID from `spawn`, readable results, and workers that exit when done.
 - Saved model and reasoning settings when steering a worker.
-- Explicit worker identity and protection against recursive delegation.
+- Native Codex subagents within workers, with the worker's model/effort defaults.
+- Explicit worker identity and protection against recursive worker spawning,
+  including from those native subagents.
 - Literal handling of prompts, including quotes, newlines, and shell syntax.
 - Existing user commands and unrelated Codex hooks during installation.
 

@@ -39,7 +39,7 @@ apply.
 | **Fire and forget** | `spawn` returns a worker ID immediately; the worker survives the launching shell closing. |
 | **Explicit context** | Pass the task and everything the worker needs. No parent transcript is copied. |
 | **Cost-conscious defaults** | Workers use **Luna / medium**, with explicit model and reasoning overrides. |
-| **No delegation loops** | Workers receive their role at startup, have native subagents disabled, and cannot launch more workers through `mcx`. |
+| **Controlled delegation** | Workers may use native Codex subagents; workers and their subagents cannot launch more workers through `mcx`. |
 | **Inspectable state** | Prompts, status, logs, and answers are files in `.mcx/`. |
 
 ## Quickstart
@@ -122,7 +122,8 @@ and answer; Codex retains its conversation history.
 ## Choose your worker model
 
 The worker default is explicitly **`gpt-5.6-luna` / `medium`**, including when the
-coordinator uses Astra. There is no automatic escalation to a larger model.
+coordinator uses Astra. Native subagents default to their worker's saved model and
+reasoning effort as well. There is no automatic escalation to a larger model.
 
 ```sh
 # Give a more demanding task a stronger worker.
@@ -151,14 +152,16 @@ The global `SessionStart` hook adds a short, role-specific instruction:
 | Session | Startup context |
 | --- | --- |
 | **Coordinator** | How to call `mcx`, provide complete task context, collect results, and choose an appropriate model. |
-| **Worker** | Complete the assigned task, return the result, and finish. Do not delegate or launch more sessions. |
+| **Worker** | Complete the assigned task, using native Codex subagents if useful. Collect their results, close them, and finish. Do not launch independent workers. |
 
 The hook runs on startup, resume, clear, and compaction. Worker rules are also
 included in every worker input, so they remain present without the global hook.
 `MCX_WORKER=1` is exported and explicitly set in Codex's shell environment;
-`spawn` and `steer` reject calls from workers. Native Codex subagents are disabled.
+`spawn` and `steer` reject calls from workers and their subagents. Native Codex
+subagents are enabled, with the normal Codex session limits. The worker's role
+instructions also forbid independent sessions through direct Codex/Claude CLI calls.
 
-This prevents accidental recursive delegation. It is not a security boundary
+This prevents accidental recursive worker spawning. It is not a security boundary
 against deliberately changing the environment. Codex still loads its normal
 configuration and project instructions, including `AGENTS.md`.
 
