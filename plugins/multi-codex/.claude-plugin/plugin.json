@@ -1,6 +1,6 @@
 {
   "name": "multi-codex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Launch lightweight background Codex workers from Claude Code. Five shell commands, fresh context, and Luna defaults.",
   "author": {"name": "exPardus", "url": "https://github.com/exPardus"},
   "homepage": "https://github.com/exPardus/multi-codex#readme",

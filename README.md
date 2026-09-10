@@ -37,6 +37,7 @@ apply.
 | Small by design | What you get |
 | --- | --- |
 | **Fire and forget** | `spawn` returns a worker ID immediately; the worker survives the launching shell closing. |
+| **Track completion** | `spawn --wait` stays alive for one run so a harness can manage it as a background command. |
 | **Explicit context** | Pass the task and everything the worker needs. No parent transcript is copied. |
 | **Cost-conscious defaults** | Workers use **Luna / medium**, with explicit model and reasoning overrides. |
 | **Controlled delegation** | Workers may use native Codex subagents; workers and their subagents cannot launch more workers through `mcx`. |
@@ -147,9 +148,60 @@ mcx steer "$auth" "Check whether refresh token expiry changes your findings."
 and **1** for a failed, stopped, lost, or invalid job. Errors point to the logs.
 
 Steering starts a new process in the same conversation; it is not live message
-injection. The model and reasoning settings stay the same. If the initial session
+injection. The model, reasoning, and approval settings stay the same. If the initial session
 ID is not available yet, retry shortly. A steer replaces that run's local logs
 and answer; Codex retains its conversation history.
+
+### Track a worker with your harness
+
+Run these commands using Codex or Claude Code's background shell facility:
+
+```sh
+mcx spawn --wait "Review src/auth. Return concrete findings; do not edit."
+mcx steer --wait ID "Check whether refresh token expiry changes your findings."
+```
+
+`--wait` prints the ID immediately, then waits for that specific run. It reports
+completion on stderr and exits with the worker's exit code: 0 for success,
+nonzero for failure or interruption. Read the answer with `mcx result ID`.
+Use your harness's completion notification when supported, or collect its
+background process handle. A background command does not itself guarantee an
+automatic wake-up in every harness.
+
+When steering, the old waiter exits with an interruption status; background the
+new `steer --wait` command to track the resumed run. Each waiter owns one run.
+Cancelling a waiter with TERM, INT, or HUP stops its run and child processes;
+cleanup cannot affect a replacement run. A forced SIGKILL cannot run cleanup;
+use `mcx stop ID` in that case.
+
+Do not append shell `&`/`nohup` or use `id=$(mcx spawn --wait ...)` when relying
+on harness tracking. Without `--wait`, the existing detached workflow is unchanged.
+
+## Worker approval mode
+
+| Mode | Behavior |
+| --- | --- |
+| `never` (default) | Workspace-write sandbox; cannot request approval. |
+| `auto` | Workspace-write sandbox; eligible approval requests go to Codex's automatic reviewer. |
+| `unrestricted` | No sandbox or approval prompts (`--dangerously-bypass-approvals-and-sandbox`). |
+
+Set `approval=auto` (or `never` / `unrestricted`) in either plain-text file:
+
+- Global: `$XDG_CONFIG_HOME/mcx/config`, or `~/.config/mcx/config` when unset.
+- Local: `.mcx/config`, or `$MCX_DIR/config` when using a custom job directory.
+
+Local config overrides global config. `MCX_APPROVAL` overrides both for new workers:
+
+```sh
+MCX_APPROVAL=auto mcx spawn --wait "Run the tests and report the results."
+```
+
+The files accept the `approval` key, blank lines, whitespace, and `#` comments;
+they are parsed as data, never executed. Keep the local file untracked with the
+rest of `.mcx/`. The selected mode is saved with the job and preserved by `steer`.
+Older jobs without a saved mode retain `never`. These settings do not modify
+your Codex configuration. Auto mode requires Codex automatic-review support;
+a reviewer denial is a blocker for the worker to report, not a switch to unrestricted.
 
 ## Choose your worker model
 
@@ -253,7 +305,9 @@ of its caller. `stop` sends TERM to that group and uses KILL after roughly three
 seconds if needed.
 
 Workers edit the caller's current directory with `workspace-write` permissions
-and approval policy `never`. The launching environment must permit running Codex.
+and approval policy `never` by default. The approval setting can opt into automatic
+review or unrestricted execution. `--wait` adds a waiting launcher that exits
+with its child; it needs no polling loop or daemon. The launching environment must permit running Codex.
 There is no automatic retry, worktree creation, or file merge handling.
 
 ### Plain files, easy inspection
@@ -263,6 +317,7 @@ There is no automatic retry, worktree creation, or file merge handling.
 └── <worker-id>/
     ├── prompt          Instructions for the current run
     ├── model, effort   Saved model selection
+    ├── approval        Saved approval mode
     ├── pid, state      Process identity and lifecycle state
     ├── events.jsonl    Codex's event stream
     ├── log             Diagnostics
@@ -277,6 +332,7 @@ you no longer need their results. Keep `.mcx/` out of your project's Git history
 | --- | --- | --- |
 | `MCX_MODEL` | Model for new workers | `gpt-5.6-luna` |
 | `MCX_EFFORT` | Reasoning effort for new workers | `medium` |
+| `MCX_APPROVAL` | Approval mode for new workers: `never`, `auto`, `unrestricted` | Local/global config, otherwise `never` |
 | `MCX_DIR` | Job storage directory | `.mcx/` in the current directory |
 | `CODEX_BIN` | Codex executable or wrapper | `codex` from PATH |
 | `MCX_BIN_DIR` | Installer's command directory | `~/.local/bin` |

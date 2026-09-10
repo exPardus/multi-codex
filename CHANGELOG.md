@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+- Add `spawn --wait` and `steer --wait` for harness-managed background commands.
+  Each waiter follows one run, returns its exit status, and cancels only that run.
+- Add `never`, `auto`, and `unrestricted` worker approval modes, with global/local
+  config and `MCX_APPROVAL` overrides. Steering preserves the saved mode.
+
+## 0.1.0
 
 - Package native Codex and Claude Code plugins with one shared mcx skill and hook.
 - Add `install.py` targets for either app, both apps, or PATH commands only.

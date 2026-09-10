@@ -21,8 +21,9 @@ executable and makes no model calls. GitHub Actions runs it on Linux and macOS.
 
 - Fresh worker conversations with only the supplied task context and normal
   Codex/project instructions.
-- An immediate ID from `spawn`, readable results, and workers that exit when done.
-- Saved model and reasoning settings when steering a worker.
+- An immediate ID from `spawn`, optional waiting for one run, and workers that exit when done.
+- Saved model, reasoning, and approval settings when steering a worker.
+- Cancellation of a waiter must never signal a replacement run.
 - Native Codex subagents within workers, with the worker's model/effort defaults.
 - Explicit worker identity and protection against recursive worker spawning,
   including from those native subagents.
@@ -51,6 +52,8 @@ Keep runtime dependencies out of the launcher. Process lifecycle changes need
 behavioral tests, especially around stopping, resuming, and concurrent completion.
 Use small, bounded prompts if a change needs a real Codex check, and stop any test
 workers afterward.
+Verify all approval modes and config precedence without relying on the developer's
+personal config. Keep config parsing as data; never source a repository config.
 
 ## Pull requests
 

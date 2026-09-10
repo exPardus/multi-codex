@@ -7,17 +7,24 @@ self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}
 fail() { printf 'mcx: %s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
-mcx spawn [-m MODEL] [-r EFFORT] "instructions"
+mcx spawn [--wait] [-m MODEL] [-r EFFORT] "instructions"
                              Start a fresh background worker; print its ID.
 mcx spawn -                  Read instructions from stdin.
 mcx list                     List local workers and their states.
 mcx result ID                Print the final answer (exit 2 if still running).
 mcx stop ID                  Stop a worker and its child processes.
-mcx steer ID "instructions"  Interrupt and resume that worker with new input.
+mcx steer [--wait] ID "instructions"
+                             Interrupt and resume that worker with new input.
 mcx steer ID -               Read new instructions from stdin.
 
 Requires Bash and an authenticated Codex CLI. State: $MCX_DIR or ./.mcx
 Default model: gpt-5.6-luna (MCX_MODEL). Reasoning: medium (MCX_EFFORT).
+--wait prints the ID, waits for this run, and exits with its status.
+Approval: never by default; MCX_APPROVAL=auto enables Codex automatic review.
+Config: $XDG_CONFIG_HOME/mcx/config (or ~/.config/mcx/config), then .mcx/config
+(or $MCX_DIR/config). Environment wins.
+Each config accepts approval=auto|never|unrestricted.
+unrestricted disables both sandboxing and approval prompts.
 EOF
 }
 
@@ -41,6 +48,7 @@ The lightweight multi-codex helper is available as: $launcher
 For user-authorized background Codex tasks, use the mcx skill on demand.
 Commands: spawn, list, result, stop, steer; run "$launcher" --help for syntax.
 Provide complete task context; no parent transcript is inherited. Read results.
+Use spawn --wait / steer --wait with your shell tool's background execution.
 Defaults: gpt-5.6-luna/medium; Astra only on explicit user request.
 Workers exit when done. MCX_WORKER=1 forbids further independent worker launches;
 native Codex subagents remain allowed.
@@ -57,7 +65,9 @@ state() {
 # Match the process group leader to this job before sending any signals.
 alive() {
     local group command inspection
-    pid=$(cat "$job/pid" 2>/dev/null) || return 1
+    if [[ $# == 1 ]]; then pid=$1; else
+        pid=$(cat "$job/pid" 2>/dev/null) || return 1
+    fi
     [[ $pid =~ ^[0-9]+$ && $pid -gt 1 ]] || return 1
     if ! inspection=$(ps -ww -p "$pid" -o pgid= -o args= 2>&1); then
         [[ -z $inspection ]] && return 1
@@ -83,19 +93,63 @@ status() {
     printf '%s\n' "$current"
 }
 
-stop_worker() {
+terminate_group() {
     local i
+    kill -TERM -- "-$pid" 2>/dev/null || fail 'could not signal worker process group'
+    for ((i=0; i<30; i++)); do
+        kill -0 -- "-$pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -KILL -- "-$pid" 2>/dev/null || :
+}
+
+stop_worker() {
     if alive; then
-        kill -TERM -- "-$pid" 2>/dev/null || fail 'could not signal worker process group'
-        for ((i=0; i<30; i++)); do
-            kill -0 -- "-$pid" 2>/dev/null || break
-            sleep 0.1
-        done
-        kill -KILL -- "-$pid" 2>/dev/null || :
+        terminate_group
         state stopped
     elif [[ $? == 2 ]]; then
         fail 'process inspection denied; stop/steer requires a shell allowed to inspect processes'
     fi
+}
+
+# shellcheck disable=SC2329 # Called by the waiting launcher's signal traps.
+cancel_wait() {
+    trap '' TERM INT HUP
+    # Never look up a replacement run's PID when cancelling this waiter.
+    if alive "$wait_pid"; then
+        terminate_group
+        if mkdir "$job/lock" 2>/dev/null; then
+            [[ $(cat "$job/pid") != "$wait_pid" ]] || state stopped
+            rmdir "$job/lock"
+        fi
+    elif [[ $? == 2 ]]; then
+        printf 'mcx: cancellation inspection denied; run mcx stop %s from an allowed shell\n' "${job##*/}" >&2
+    fi
+    exit "$1"
+}
+
+wait_for_worker() {
+    local rc=0 outcome='done'
+    wait "$wait_pid" || rc=$?
+    trap - TERM INT HUP
+    if [[ $rc -ge 128 ]]; then outcome=interrupted
+    elif [[ $rc != 0 ]]; then outcome=failed; fi
+    printf 'mcx: %s %s (exit %s); read with mcx result %s\n' "${job##*/}" "$outcome" "$rc" "${job##*/}" >&2
+    return "$rc"
+}
+
+read_config() {
+    local line
+    [[ -f $1 ]] || return 0
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%%#*}
+        line=${line//[[:space:]]/}
+        case "$line" in
+            '') ;;
+            approval=auto|approval=never|approval=unrestricted) approval=${line#approval=} ;;
+            *) fail "invalid config in $1; expected approval=auto, never, or unrestricted" ;;
+        esac
+    done < "$1"
 }
 
 read_prompt() {
@@ -111,7 +165,13 @@ launch() {
     # in that group. nohup and redirected descriptors detach it from the caller.
     set -m
     nohup bash "$self" _run "$job" </dev/null >"$job/log" 2>&1 &
-    printf '%s\n' "$!" > "$job/pid"
+    wait_pid=$!
+    if [[ $wait_mode == 1 ]]; then
+        trap 'cancel_wait 143' TERM
+        trap 'cancel_wait 130' INT
+        trap 'cancel_wait 129' HUP
+    fi
+    printf '%s\n' "$wait_pid" > "$job/pid"
     printf '%s\n' "${job##*/}"
 }
 
@@ -133,13 +193,20 @@ if [[ ${1:-} == _run ]]; then
     cd "$(cat "$job/cwd")"
     unset CODEX_THREAD_ID
     export MCX_WORKER=1
-    args=(-a never --enable multi_agent -c agents.enabled=true
+    approval=$(cat "$job/approval" 2>/dev/null) || approval=never
+    case "$approval" in
+        auto) args=(-a on-request -c approvals_reviewer=auto_review --sandbox workspace-write) ;;
+        never) args=(-a never --sandbox workspace-write) ;;
+        unrestricted) args=(--dangerously-bypass-approvals-and-sandbox) ;;
+        *) fail 'invalid saved approval mode' ;;
+    esac
+    args+=(--enable multi_agent -c agents.enabled=true
           -c "agents.default_subagent_model=$(cat "$job/model")"
           -c "agents.default_subagent_reasoning_effort=$(cat "$job/effort")"
           -c 'shell_environment_policy.set.MCX_WORKER="1"'
           exec -m "$(cat "$job/model")"
           -c "model_reasoning_effort=\"$(cat "$job/effort")\""
-          --sandbox workspace-write --skip-git-repo-check
+          --skip-git-repo-check
           --json -o "$job/result")
     if [[ -s $job/session ]]; then args+=(resume "$(cat "$job/session")"); fi
     # Keep worker rules present even before the optional global hook is installed.
@@ -155,10 +222,12 @@ fi
 
 model=${MCX_MODEL:-gpt-5.6-luna}
 effort=${MCX_EFFORT:-medium}
+wait_mode=0
 if [[ ${1:-} == spawn ]]; then
     shift
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --wait) wait_mode=1; shift ;;
             -m|--model) [[ $# -ge 2 ]] || fail 'missing model'; model=$2; shift 2 ;;
             -r|--reasoning) [[ $# -ge 2 ]] || fail 'missing reasoning effort'; effort=$2; shift 2 ;;
             *) break ;;
@@ -167,6 +236,10 @@ if [[ ${1:-} == spawn ]]; then
     [[ -n $model && $model != -* ]] || fail 'invalid model'
     case "$effort" in none|low|medium|high|xhigh|max) ;; *) fail 'invalid reasoning effort' ;; esac
     set -- spawn "$@"
+elif [[ ${1:-} == steer && ${2:-} == --wait ]]; then
+    wait_mode=1
+    shift 2
+    set -- steer "$@"
 fi
 
 case "${1:-}" in
@@ -184,6 +257,11 @@ root=$(cd "$root" && pwd)
 
 case "$1" in
     spawn)
+        approval=never
+        read_config "${XDG_CONFIG_HOME:-$HOME/.config}/mcx/config"
+        read_config "$root/config"
+        approval=${MCX_APPROVAL-$approval}
+        case "$approval" in auto|never|unrestricted) ;; *) fail 'invalid MCX_APPROVAL; expected auto, never, or unrestricted' ;; esac
         codex=$(command -v "${CODEX_BIN:-codex}") || fail 'codex is not installed or not on PATH'
         [[ -f $codex && -x $codex ]] || fail 'CODEX_BIN must be an executable file'
         codex=$(cd "$(dirname "$codex")" && pwd)/$(basename "$codex")
@@ -194,6 +272,7 @@ case "$1" in
         printf '%s\n' "$codex" > "$job/codex"
         printf '%s\n' "$model" > "$job/model"
         printf '%s\n' "$effort" > "$job/effort"
+        printf '%s\n' "$approval" > "$job/approval"
         printf '%s\n' "$prompt" > "$job/prompt"
         launch
         ;;
@@ -235,5 +314,10 @@ case "$1" in
             printf '%s\n' "$prompt" > "$job/prompt"
             launch
         fi
+        rmdir "$job/lock"
+        trap - EXIT
         ;;
 esac
+
+# Release stop/steer's lock before waiting so another controller can interrupt.
+if [[ $wait_mode == 1 ]]; then wait_for_worker; fi

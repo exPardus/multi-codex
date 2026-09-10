@@ -42,10 +42,9 @@ We retain the host's context limits and keep our output below 1,000 characters
 in tests rather than raising those limits.
 See [OpenAI: Hooks](https://learn.chatgpt.com/docs/hooks).
 
-With `mcx` on PATH, the coordinator hook is 471 characters (64 whitespace-separated
-words); the worker hook is 529 characters (81 words). These are text-size measures,
-not billed token counts. A cached absolute launcher path adds its own length.
-Compared with the prior hook, coordinator text is about 52% shorter.
+The coordinator hook points to `spawn --wait` / `steer --wait` for harness-managed
+background execution. Both role messages stay below 1,000 characters, checked by
+the test suite. A cached absolute launcher path adds its own length.
 
 Worker rules also appear in the initial task input. This small intentional
 duplication keeps workers correctly identified when a plugin is absent or its

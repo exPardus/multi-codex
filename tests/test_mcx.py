@@ -3,6 +3,7 @@ import concurrent.futures
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import tempfile
@@ -19,8 +20,9 @@ class Workers(unittest.TestCase):
         self.cwd = Path(self.temp.name)
         self.jobs = self.cwd / 'state with spaces'
         self.env = dict(os.environ, CODEX_BIN=str(REPO / 'tests/fake-codex'),
-                        MCX_DIR=str(self.jobs), CODEX_THREAD_ID='parent-context')
-        for key in ('MCX_MODEL', 'MCX_EFFORT', 'MCX_WORKER'):
+                        MCX_DIR=str(self.jobs), CODEX_THREAD_ID='parent-context',
+                        XDG_CONFIG_HOME=str(self.cwd / 'global config'))
+        for key in ('MCX_MODEL', 'MCX_EFFORT', 'MCX_WORKER', 'MCX_APPROVAL'):
             self.env.pop(key, None)
 
     def tearDown(self):
@@ -39,6 +41,25 @@ class Workers(unittest.TestCase):
         worker = result.stdout.strip()
         self.assertRegex(worker, r'^[a-zA-Z0-9]{8}$')
         return worker
+
+    def start_waiter(self, *args):
+        process = subprocess.Popen([str(MCX), *args], cwd=self.cwd, env=self.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, start_new_session=True)
+        self.addCleanup(self.close_waiter, process)
+        self.assertTrue(select.select([process.stdout], [], [], 5)[0], 'no immediate worker ID')
+        worker = process.stdout.readline().strip()
+        self.assertRegex(worker, r'^[a-zA-Z0-9]{8}$')
+        return process, worker
+
+    @staticmethod
+    def close_waiter(process):
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=8)
+
+    def invocation(self, worker):
+        return json.loads(self.await_file(worker, 'invocation.json').read_text())
 
     def await_file(self, worker, name):
         target = self.jobs / worker / name
@@ -84,6 +105,136 @@ class Workers(unittest.TestCase):
         self.assertIn('agents.default_subagent_model=gpt-5.6-luna', record['args'])
         self.assertIn('agents.default_subagent_reasoning_effort=medium', record['args'])
         self.assertIn('shell_environment_policy.set.MCX_WORKER="1"', record['args'])
+        self.assertEqual(record['args'][record['args'].index('-a') + 1], 'never')
+        self.assertIn('workspace-write', record['args'])
+
+    def test_wait_prints_id_immediately_and_waits_for_exit(self):
+        process, worker = self.start_waiter('spawn', '--wait', 'delay:.5')
+        self.assertIsNone(process.poll())
+        stdout, stderr = process.communicate(timeout=8)
+        self.assertEqual((process.returncode, stdout), (0, ''), stderr)
+        self.assertIn('done (exit 0)', stderr)
+        self.assertEqual(self.run_mcx('result', worker).stdout, 'delay:.5\n')
+
+    def test_wait_returns_worker_failure(self):
+        process, worker = self.start_waiter('spawn', '--wait', 'fail')
+        _, stderr = process.communicate(timeout=8)
+        self.assertEqual(process.returncode, 7, stderr)
+        self.assertIn('failed (exit 7)', stderr)
+        self.assertEqual(self.run_mcx('result', worker).returncode, 1)
+
+    def test_wait_cancellation_stops_process_tree(self):
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            with self.subTest(signal=sig):
+                process, worker = self.start_waiter('spawn', '--wait', 'hold')
+                child = int(self.await_file(worker, 'child-pid').read_text())
+                process.send_signal(sig)
+                process.communicate(timeout=8)
+                self.assertEqual(process.returncode, 128 + sig)
+                self.assertFalse(self.process_running(child))
+                self.assertIn('stopped', self.run_mcx('list').stdout)
+
+    def test_stop_releases_waiter(self):
+        process, worker = self.start_waiter('spawn', '--wait', 'hold')
+        self.await_file(worker, 'child-pid')
+        self.assertEqual(self.run_mcx('stop', worker).returncode, 0)
+        _, stderr = process.communicate(timeout=8)
+        self.assertIn(process.returncode, (137, 143), stderr)
+        self.assertIn('interrupted', stderr)
+
+    def test_steer_wait_replaces_waiter_and_releases_lock(self):
+        first, worker = self.start_waiter('spawn', '--wait', 'hold')
+        self.await_file(worker, 'child-pid')
+        session = self.invocation(worker)['session']
+        second, resumed = self.start_waiter('steer', '--wait', worker, 'hold')
+        self.assertEqual(worker, resumed)
+        first.communicate(timeout=8)
+        self.assertIn(first.returncode, (137, 143))
+        self.assertIsNone(second.poll())
+        self.await_file(worker, 'events.jsonl')
+        self.assertEqual(self.invocation(worker)['session'], session)
+        # A second controller can interrupt while steer --wait is still waiting.
+        third, resumed = self.start_waiter('steer', '--wait', worker, 'last run')
+        second.communicate(timeout=8)
+        self.assertIn(second.returncode, (137, 143))
+        _, stderr = third.communicate(timeout=8)
+        self.assertEqual(third.returncode, 0, stderr)
+        self.assertEqual(self.run_mcx('result', resumed).stdout, 'last run\n')
+
+    def test_cancelling_old_waiter_cannot_kill_replacement(self):
+        first, worker = self.start_waiter('spawn', '--wait', 'hold')
+        self.await_file(worker, 'child-pid')
+        first.send_signal(signal.SIGSTOP)
+        try:
+            self.assertEqual(self.run_mcx('steer', worker, 'hold').returncode, 0)
+            self.await_file(worker, 'events.jsonl')
+            first.send_signal(signal.SIGTERM)
+        finally:
+            first.send_signal(signal.SIGCONT)
+        first.communicate(timeout=8)
+        self.assertEqual(first.returncode, 143)
+        self.assertEqual(self.run_mcx('result', worker).returncode, 2)
+        self.assertTrue(self.process_running(int((self.jobs / worker / 'pid').read_text())))
+
+    def test_steer_wait_completed_worker(self):
+        worker = self.spawn()
+        self.await_result(worker)
+        process, resumed = self.start_waiter('steer', '--wait', worker, 'follow up')
+        _, stderr = process.communicate(timeout=8)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertEqual(self.run_mcx('result', resumed).stdout, 'follow up\n')
+
+    def test_approval_config_precedence_and_steer_preservation(self):
+        config = Path(self.env['XDG_CONFIG_HOME']) / 'mcx/config'
+        config.parent.mkdir(parents=True)
+        config.write_text('# Global preference\n approval = auto # comment\n')
+        worker = self.spawn()
+        self.await_result(worker)
+        args = self.invocation(worker)['args']
+        self.assertEqual(args[args.index('-a') + 1], 'on-request')
+        self.assertIn('approvals_reviewer=auto_review', args)
+        self.assertIn('workspace-write', args)
+        (self.jobs / 'config').write_text('approval=never')
+        local = self.spawn()
+        self.await_result(local)
+        self.assertEqual((self.jobs / local / 'approval').read_text().strip(), 'never')
+        self.env['MCX_APPROVAL'] = 'unrestricted'
+        override = self.spawn()
+        self.await_result(override)
+        args = self.invocation(override)['args']
+        self.assertIn('--dangerously-bypass-approvals-and-sandbox', args)
+        self.assertNotIn('--sandbox', args)
+        self.assertNotIn('-a', args)
+        self.assertEqual((self.jobs / override / 'approval').read_text().strip(), 'unrestricted')
+        self.assertEqual(self.run_mcx('steer', worker, 'follow up').returncode, 0)
+        self.await_result(worker)
+        self.assertIn('approvals_reviewer=auto_review', self.invocation(worker)['args'])
+
+    def test_legacy_jobs_keep_never_on_steer(self):
+        worker = self.spawn()
+        self.await_result(worker)
+        (self.jobs / worker / 'approval').unlink()
+        self.env['MCX_APPROVAL'] = 'auto'
+        self.assertEqual(self.run_mcx('steer', worker, 'follow up').returncode, 0)
+        self.await_result(worker)
+        args = self.invocation(worker)['args']
+        self.assertEqual(args[args.index('-a') + 1], 'never')
+
+    def test_config_is_validated_and_never_executed(self):
+        self.jobs.mkdir()
+        for content in ('approval=typo', 'approval=$(touch SHOULD_NOT_EXIST)',
+                        'touch SHOULD_NOT_EXIST', 'unknown=auto'):
+            with self.subTest(content=content):
+                (self.jobs / 'config').write_text(content)
+                result = self.run_mcx('spawn', 'hello')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('invalid config', result.stderr)
+                self.assertFalse((self.cwd / 'SHOULD_NOT_EXIST').exists())
+        (self.jobs / 'config').unlink()
+        self.env['MCX_APPROVAL'] = 'typo'
+        result = self.run_mcx('spawn', 'hello')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('invalid MCX_APPROVAL', result.stderr)
 
     def test_steer_preserves_session_and_model(self):
         worker = self.spawn('hold', '-m', 'gpt-5.6-terra', '-r', 'low')
@@ -199,6 +350,25 @@ class Workers(unittest.TestCase):
             result = self.run_mcx(*args, env=env)
             self.assertEqual(result.returncode, 1)
             self.assertIn('inspection denied', result.stderr)
+
+    def test_wait_reports_denied_cancellation(self):
+        bindir = self.cwd / 'restricted-bin'
+        bindir.mkdir()
+        stub = bindir / 'ps'
+        stub.write_text('#!/bin/sh\necho "Operation not permitted" >&2\nexit 126\n')
+        stub.chmod(0o755)
+        original = self.env['PATH']
+        self.env['PATH'] = str(bindir) + os.pathsep + original
+        try:
+            process, worker = self.start_waiter('spawn', '--wait', 'hold')
+            self.await_file(worker, 'child-pid')
+            process.terminate()
+            _, stderr = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 143)
+            self.assertIn('cancellation inspection denied', stderr)
+        finally:
+            self.env['PATH'] = original
+        self.assertEqual(self.run_mcx('stop', worker).returncode, 0)
 
     def test_result_when_worker_finishes_during_process_inspection(self):
         worker = self.spawn()
