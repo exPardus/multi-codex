@@ -32,11 +32,16 @@ report that to the parent in your final answer. Return your result and finish;
 do not wait for more work. These rules also apply after resume or compaction.
 EOF
     else
+        launcher=mcx
+        command -v mcx >/dev/null 2>&1 || launcher=$self
         cat <<EOF
-The lightweight multi-codex helper is available at: $self
+The lightweight multi-codex helper is available as: $launcher
 Use shell commands for user-authorized, independent background Codex tasks:
-  "$self" spawn [-m MODEL] [-r EFFORT] "complete task and context"
-  "$self" list | result ID | stop ID | steer ID "new instruction"
+  "$launcher" spawn [-m MODEL] [-r EFFORT] "complete task and context"
+  "$launcher" list
+  "$launcher" result ID
+  "$launcher" stop ID
+  "$launcher" steer ID "new instruction"
 Each spawn starts fresh in the current directory; provide all needed context.
 Keep using the same directory or an absolute MCX_DIR to find its jobs. Workers
 exit after finishing. Read results explicitly. Steer interrupts and resumes the

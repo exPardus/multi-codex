@@ -1,108 +1,252 @@
-# multi-codex
+<p align="center">
+  <img src="docs/banner.svg" alt="multi-codex — One shell. Independent workers." width="100%">
+</p>
 
-One Bash script. Five commands. Independent background Codex CLI workers; no
-daemon, packages, registry service, or worker limit.
+<p align="center">
+  <a href="https://github.com/exPardus/multi-codex/actions/workflows/test.yml"><img src="https://github.com/exPardus/multi-codex/actions/workflows/test.yml/badge.svg" alt="Linux and macOS tests"></a>
+  <img src="https://img.shields.io/badge/Bash-3.2%2B-76e3d7?style=flat-square&amp;labelColor=12243a" alt="Bash 3.2 or newer">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-90baff?style=flat-square&amp;labelColor=12243a" alt="Linux and macOS">
+  <img src="https://img.shields.io/badge/runtime-no%20packages-76e3d7?style=flat-square&amp;labelColor=12243a" alt="No runtime packages">
+</p>
 
-Requires Bash 3.2+ and an installed, authenticated `codex` with `exec --json` and
-`exec resume` support. Uses standard Unix utilities; intended for Linux and macOS.
+<p align="center">
+  <strong>Give a Codex session independent background workers through its own shell.</strong><br>
+  One Bash executable. Five commands. Plain files. No daemon.
+</p>
 
-```sh
-id=$(./mcx spawn "Inspect src/auth and report bugs. Do not edit files.")
-./mcx list
-./mcx result "$id"
-./mcx steer "$id" "Focus on refresh token expiry."
-./mcx stop "$id"
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#five-commands">Commands</a> ·
+  <a href="#choose-your-worker-model">Models</a> ·
+  <a href="#codex-knows-its-role">Startup context</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-# Longer instructions, including all context the worker needs:
-./mcx spawn - < task.txt
+---
 
-# Override the inexpensive default for a harder task:
-./mcx spawn -m gpt-5.6-terra -r high "Fix the parser and run its tests."
-```
+## Why multi-codex?
 
-- `spawn` immediately prints an ID. Each worker starts a fresh conversation in
-  your current directory. No parent transcript is copied. Codex still loads its
-  normal configuration and project instructions such as `AGENTS.md`.
-- `list` shows IDs, states, models, reasoning effort, and the first line of each task.
-- `result` prints the final answer. Exit codes: **0** finished, **2** still running,
-  **1** failed/stopped/lost or invalid input. Errors point to the logs.
-- `stop` sends TERM to the worker's process group, then KILL after at most three
-  seconds if needed. Completed jobs are left alone.
-- `steer` **interrupts and resumes** the worker's own saved conversation with your
-  new instruction. It also works after completion. It is not live message
-  injection: the current run exits and a new process resumes the same session.
-  If Codex has not emitted a session ID yet, retry shortly. Each steer replaces
-  the previous run's local logs and answer; Codex keeps the conversation history.
+A coordinating Codex session can hand off a focused task, keep working, and collect
+an answer later. Each worker is an independent `codex exec` process, outside the
+coordinator's native subagent pool. Workers start fresh and exit when finished.
 
-Workers survive the launching shell closing and exit when their task finishes.
-There are no idle workers, automatic retries, worktrees, or file merge handling.
-Workers in the same directory share files; assign separate files when needed.
+The helper stays small enough to inspect in one sitting. There is no scheduler,
+service, database, or framework to operate. Account usage and rate limits still
+apply.
 
-Jobs live in `./.mcx/`, with plain prompt, PID, state, log, JSONL events, and result
-files. Run commands from the same directory, or set `MCX_DIR` to an absolute path
-to use one job folder across projects. Delete finished job folders to clean up.
-`CODEX_BIN` can point to another Codex executable or wrapper.
-
-Workers use your existing Codex login, with `workspace-write` and approvals set to
-`never` so they can edit the workspace without waiting for input.
-The launching environment must permit running Codex. No app configuration is
-changed by the launcher. Account usage/rate limits still apply.
-
-## Model choice
-
-Workers explicitly default to **gpt-5.6-luna / medium**, even if the coordinator
-uses Astra or extra-high reasoning. `-m MODEL` and `-r EFFORT` override this for a
-spawn; `MCX_MODEL` and `MCX_EFFORT` set your preferred defaults. Steering keeps the
-worker's saved model and effort. There is no automatic fallback to a larger model.
-
-| Model | Suggested use |
+| Small by design | What you get |
 | --- | --- |
-| `gpt-5.6-luna` | Small, clearly defined tasks; default |
-| `gpt-5.6-terra` | Everyday coding that needs more reasoning |
-| `gpt-5.6-sol` | Complex, open-ended work |
-| `gpt-6-astra` | Only when deliberately requested |
+| **Fire and forget** | `spawn` returns a worker ID immediately; the worker survives the launching shell closing. |
+| **Explicit context** | Pass the task and everything the worker needs. No parent transcript is copied. |
+| **Cost-conscious defaults** | Workers use **Luna / medium**, with explicit model and reasoning overrides. |
+| **No delegation loops** | Workers receive their role at startup, have native subagents disabled, and cannot launch more workers through `mcx`. |
+| **Inspectable state** | Prompts, status, logs, and answers are files in `.mcx/`. |
 
-These choices follow the [Codex model guide](https://learn.chatgpt.com/docs/models?surface=cli).
+## Quickstart
 
-## Codex startup context
+You need **Bash 3.2+**, an installed and authenticated **Codex CLI**, and standard
+Unix utilities. Python 3 is used only for installation and tests. The current
+integration was verified with Codex CLI **0.153.4**.
 
 ```sh
+git clone https://github.com/exPardus/multi-codex.git
+cd multi-codex
 python3 install-codex.py
+
+# From any project directory:
+cd /path/to/your/project
+id=$(mcx spawn "Review src/auth for bugs. Report findings; do not edit files.")
+mcx list
+mcx result "$id"
 ```
 
-The optional installer registers `mcx _context` as a global `SessionStart` hook in
-`$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`), preserving other hooks.
-Python 3 is needed only for installation and tests, not for the launcher.
-Open `/hooks` in Codex once and trust the **Loading multi-codex context** hook.
-Codex requires review of the specific hook definition; this tool does not bypass
-hook trust. See the [Codex hooks guide](https://learn.chatgpt.com/docs/hooks).
+The installer links **`mcx`** and **`multicodex`** into `~/.local/bin` and registers
+the Codex startup hook. Both names run the same program. If that directory is not
+on PATH, the installer prints the line to add to your shell configuration:
 
-New local sessions receive the command path and a short usage/model guide.
-Workers instead receive explicit worker instructions, including no delegation.
-The hook runs at startup, resume, clear, and compaction. Restart existing clients
-if needed. Other machines or a different `CODEX_HOME` need their own installation.
-If you move this repository, rerun the installer and trust the updated hook.
-Remove its entry from `hooks.json` to uninstall; an existing hooks file is backed
-up as `hooks.json.mcx-backup` when the installer changes it.
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-Recursion prevention also works without the global hook: every worker input
-contains the worker rules, native Codex subagents are disabled, and `MCX_WORKER=1`
-is exported and set explicitly in Codex's shell environment. `mcx spawn` and
-`mcx steer` reject calls from workers. This prevents accidental delegation loops;
-it is not an isolation boundary against deliberately changing the environment.
+Open `/hooks` in Codex and trust **Loading multi-codex context** once. New local
+sessions will know how to use the helper. The launcher also works immediately
+without the optional hook: `./mcx --help`.
 
-To use it from anywhere, put this directory on `PATH` or copy `mcx` into an existing
-writable directory on your `PATH`.
+> **Keep the checkout.** Installed commands are symlinks to it, so `git pull`
+> updates them. Use `MCX_BIN_DIR=/your/bin python3 install-codex.py` for a different
+> installation directory. Existing unrelated commands are never overwritten.
 
-Built around Codex's [non-interactive CLI](https://learn.chatgpt.com/docs/non-interactive-mode).
+## Five commands
 
-## Tests
+| Command | What it does |
+| --- | --- |
+| `mcx spawn "task"` | Starts a fresh background worker and prints its ID. |
+| `mcx list` | Shows local worker IDs, states, models, effort, and tasks. |
+| `mcx result ID` | Prints a finished worker's final answer. |
+| `mcx steer ID "new instruction"` | Interrupts the current run and resumes that worker's saved conversation. |
+| `mcx stop ID` | Stops the worker's process group; completed jobs are left alone. |
+
+Pass `-` to read a prompt from stdin. This works for both `spawn` and `steer`:
+
+```sh
+mcx spawn - < task.md
+mcx steer "$id" - < correction.md
+```
+
+### A small parallel workflow
+
+Assign separate files or independent review tasks when workers share a workspace.
+These are ordinary shell commands a coordinating Codex session can run:
+
+```sh
+auth=$(mcx spawn "Review src/auth. Return concrete bugs and locations; do not edit.")
+api=$(mcx spawn "Review src/api. Return concrete bugs and locations; do not edit.")
+
+# Continue your own work, then inspect completion.
+mcx list
+mcx result "$auth"
+mcx result "$api"
+
+# Follow up in the same worker conversation, even after it finishes.
+mcx steer "$auth" "Check whether refresh token expiry changes your findings."
+```
+
+`result` exits with **0** when an answer is available, **2** while work is running,
+and **1** for a failed, stopped, lost, or invalid job. Errors point to the logs.
+
+Steering starts a new process in the same conversation; it is not live message
+injection. The model and reasoning settings stay the same. If the initial session
+ID is not available yet, retry shortly. A steer replaces that run's local logs
+and answer; Codex retains its conversation history.
+
+## Choose your worker model
+
+The worker default is explicitly **`gpt-5.6-luna` / `medium`**, including when the
+coordinator uses Astra. There is no automatic escalation to a larger model.
+
+```sh
+# Give a more demanding task a stronger worker.
+mcx spawn -m gpt-5.6-terra -r high "Fix the parser and run its tests."
+
+# Or choose defaults for this shell.
+export MCX_MODEL=gpt-5.6-terra
+export MCX_EFFORT=medium
+```
+
+| Model | Suggested tasks |
+| --- | --- |
+| **Luna** · `gpt-5.6-luna` | Small, clearly defined tasks; the default. |
+| **Terra** · `gpt-5.6-terra` | Everyday coding that needs more reasoning. |
+| **Sol** · `gpt-5.6-sol` | Complex or open-ended work. |
+| **Astra** · `gpt-6-astra` | Deliberate use when specifically requested. |
+
+`-r` accepts `none`, `low`, `medium`, `high`, `xhigh`, or `max`; the chosen model
+must support that setting. See the [Codex model guide](https://learn.chatgpt.com/docs/models?surface=cli)
+for model capabilities and availability.
+
+## Codex knows its role
+
+The global `SessionStart` hook adds a short, role-specific instruction:
+
+| Session | Startup context |
+| --- | --- |
+| **Coordinator** | How to call `mcx`, provide complete task context, collect results, and choose an appropriate model. |
+| **Worker** | Complete the assigned task, return the result, and finish. Do not delegate or launch more sessions. |
+
+The hook runs on startup, resume, clear, and compaction. Worker rules are also
+included in every worker input, so they remain present without the global hook.
+`MCX_WORKER=1` is exported and explicitly set in Codex's shell environment;
+`spawn` and `steer` reject calls from workers. Native Codex subagents are disabled.
+
+This prevents accidental recursive delegation. It is not a security boundary
+against deliberately changing the environment. Codex still loads its normal
+configuration and project instructions, including `AGENTS.md`.
+
+<details>
+<summary><strong>Hook installation, updates, and removal</strong></summary>
+
+The installer registers `mcx _context` in `$CODEX_HOME/hooks.json`, normally
+`~/.codex/hooks.json`, while preserving unrelated hooks. It uses an absolute path
+for the hook itself so startup does not depend on shell PATH initialization.
+The injected usage instructions prefer the short `mcx` command.
+
+Codex requires trusting the specific hook definition through `/hooks`; the tool
+never bypasses that review. Existing clients may need a restart. Other machines
+and different `CODEX_HOME` directories need their own installation.
+
+If you move the checkout, remove its old command symlinks, rerun the installer,
+and trust the updated hook. To uninstall, remove the `mcx` and `multicodex`
+symlinks and the **Loading multi-codex context** entry from `hooks.json`.
+An existing hooks file is backed up as `hooks.json.mcx-backup` when changed.
+
+See the [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
+
+</details>
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["Your shell or coordinating Codex"] -->|"spawn · task + context"| B["mcx"]
+    B --> C["Independent codex exec"]
+    C -->|"writes answer, then exits"| D[".mcx / job ID"]
+    A -->|"result"| D
+    A -.->|"steer: interrupt + resume"| C
+```
+
+A short-lived wrapper records the Codex process's exit state. `nohup`, redirected
+file descriptors, and a separate process group let the worker run independently
+of its caller. `stop` sends TERM to that group and uses KILL after roughly three
+seconds if needed.
+
+Workers edit the caller's current directory with `workspace-write` permissions
+and approval policy `never`. The launching environment must permit running Codex.
+There is no automatic retry, worktree creation, or file merge handling.
+
+### Plain files, easy inspection
+
+```text
+.mcx/
+└── <worker-id>/
+    ├── prompt          Instructions for the current run
+    ├── model, effort   Saved model selection
+    ├── pid, state      Process identity and lifecycle state
+    ├── events.jsonl    Codex's event stream
+    ├── log             Diagnostics
+    └── result          Final answer
+```
+
+Run commands from the same project directory, or set **`MCX_DIR`** to an absolute
+path to share one job folder across projects. Delete finished job folders when
+you no longer need their results. Keep `.mcx/` out of your project's Git history.
+
+| Environment variable | Purpose | Default |
+| --- | --- | --- |
+| `MCX_MODEL` | Model for new workers | `gpt-5.6-luna` |
+| `MCX_EFFORT` | Reasoning effort for new workers | `medium` |
+| `MCX_DIR` | Job storage directory | `.mcx/` in the current directory |
+| `CODEX_BIN` | Codex executable or wrapper | `codex` from PATH |
+| `MCX_BIN_DIR` | Installer's command directory | `~/.local/bin` |
+
+## Development
 
 ```sh
 bash -n mcx
-shellcheck mcx  # optional development tool
+shellcheck mcx
 python3 -m unittest discover -s tests -v
 ```
 
-The offline tests use a fake Codex and exercise real process lifecycles. CI runs
-them on Linux and macOS; no credentials or model calls are needed.
+The offline tests exercise real process lifecycles using a fake Codex, plus
+installation and hook preservation. CI runs on **Linux and macOS** with no
+credentials or model calls. Real Codex smoke checks have also covered spawning,
+steering, global startup context, and recursion prevention.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project conventions and
+[CHANGELOG.md](CHANGELOG.md) for changes.
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/exPardus">exPardus</a> around
+  <a href="https://learn.chatgpt.com/docs/non-interactive-mode">Codex's non-interactive CLI</a>.
+</p>

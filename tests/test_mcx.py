@@ -155,7 +155,7 @@ class Workers(unittest.TestCase):
     def test_context_hook_separates_roles(self):
         normal = self.run_mcx('_context')
         worker = self.run_mcx('_context', env=dict(self.env, MCX_WORKER='1'))
-        self.assertIn(str(MCX), normal.stdout)
+        self.assertIn('multi-codex helper is available as:', normal.stdout)
         self.assertIn('Default Luna/medium', normal.stdout)
         self.assertIn('WORKER, not a coordinator', worker.stdout)
         self.assertNotIn('Default Luna/medium', worker.stdout)

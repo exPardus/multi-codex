@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">multi-codex — One shell. Independent workers.</title>
+  <desc id="desc">A dark navy banner with the multi-codex wordmark and a diagram connecting a shell command to three independent Codex workers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#101d35"/><stop offset="1" stop-color="#080f1c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#76e3d7"/><stop offset="1" stop-color="#90baff"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#9fb8d9" stroke-opacity=".045"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="420" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="420" rx="20" fill="url(#grid)"/>
+  <rect x="1" y="1" width="1278" height="418" rx="19" fill="none" stroke="#263753"/>
+  <path d="M56 52h22m-11-11v22" stroke="#76e3d7" stroke-width="2"/>
+  <text x="92" y="57" fill="#a9bad1" font-family="sans-serif" font-size="13" letter-spacing="3">EXPARDUS / DEVELOPER TOOLS</text>
+  <text x="55" y="164" fill="#f0f5fd" font-family="sans-serif" font-size="70" font-weight="700" letter-spacing="-3">multi<tspan fill="url(#accent)">-codex</tspan></text>
+  <text x="58" y="208" fill="#c4d1e4" font-family="sans-serif" font-size="23">One shell. Independent workers.</text>
+  <text x="58" y="246" fill="#91a4bf" font-family="sans-serif" font-size="17">Send a task. Get an ID. Keep moving.</text>
+  <g font-family="monospace" font-size="13" fill="#b7c8df">
+    <rect x="58" y="286" width="116" height="34" rx="17" fill="#16263d" stroke="#2a405a"/>
+    <text x="76" y="308">5 commands</text>
+    <rect x="184" y="286" width="114" height="34" rx="17" fill="#16263d" stroke="#2a405a"/>
+    <text x="202" y="308">Bash 3.2+</text>
+    <rect x="308" y="286" width="118" height="34" rx="17" fill="#16263d" stroke="#2a405a"/>
+    <text x="326" y="308">No daemon</text>
+  </g>
+  <g fill="none" stroke="#4d8f9b" stroke-width="2">
+    <path d="M951 127v34m0 0H761v34m190-34v34m0-34h190v34"/>
+    <circle cx="951" cy="161" r="4" fill="#76e3d7" stroke="#76e3d7"/>
+  </g>
+  <rect x="696" y="67" width="510" height="65" rx="12" fill="#17283e" stroke="#345069"/>
+  <circle cx="718" cy="87" r="3" fill="#66809c"/>
+  <circle cx="730" cy="87" r="3" fill="#66809c"/>
+  <circle cx="742" cy="87" r="3" fill="#66809c"/>
+  <text x="718" y="113" fill="#d6e8fa" font-family="monospace" font-size="16"><tspan fill="#76e3d7">$ </tspan>mcx spawn "a focused task"</text>
+  <g font-family="monospace">
+    <g transform="translate(686 198)">
+      <rect width="150" height="100" rx="12" fill="#12243a" stroke="#345069"/>
+      <circle cx="21" cy="26" r="4" fill="#76e3d7"/>
+      <text x="34" y="31" fill="#dbe9f8" font-size="14">worker 01</text>
+      <text x="18" y="58" fill="#98b5d3" font-size="13">luna / medium</text>
+      <path d="M18 77h71" stroke="#76e3d7" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(876 198)">
+      <rect width="150" height="100" rx="12" fill="#12243a" stroke="#345069"/>
+      <circle cx="21" cy="26" r="4" fill="#90baff"/>
+      <text x="34" y="31" fill="#dbe9f8" font-size="14">worker 02</text>
+      <text x="18" y="58" fill="#98b5d3" font-size="13">terra / high</text>
+      <path d="M18 77h99" stroke="#90baff" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1066 198)">
+      <rect width="150" height="100" rx="12" fill="#12243a" stroke="#345069"/>
+      <circle cx="21" cy="26" r="4" fill="#76e3d7"/>
+      <text x="34" y="31" fill="#dbe9f8" font-size="14">worker 03</text>
+      <text x="18" y="58" fill="#98b5d3" font-size="13">luna / medium</text>
+      <path d="M18 77h49" stroke="#76e3d7" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </g>
+  <path d="M58 358h1158" stroke="#263753"/>
+  <text x="58" y="387" fill="#8096b2" font-family="monospace" font-size="13">spawn · list · result · steer · stop</text>
+  <text x="1216" y="387" text-anchor="end" fill="#8096b2" font-family="monospace" font-size="13">plain files · Linux + macOS</text>
+</svg>
