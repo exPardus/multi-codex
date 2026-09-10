@@ -1,0 +1,23 @@
+{
+  "name": "multi-codex",
+  "version": "0.1.0",
+  "description": "Launch lightweight background Codex workers from Codex or Claude Code.",
+  "author": {
+    "name": "exPardus",
+    "url": "https://github.com/exPardus"
+  },
+  "homepage": "https://github.com/exPardus/multi-codex#readme",
+  "repository": "https://github.com/exPardus/multi-codex",
+  "keywords": ["codex", "workers", "shell", "delegation"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "multi-codex",
+    "shortDescription": "One shell. Independent Codex workers.",
+    "longDescription": "Five shell commands for background Codex workers: spawn, list, result, stop, and steer. Fresh task context, Luna defaults, and worker instructions that prevent recursive worker launches.",
+    "developerName": "exPardus",
+    "category": "Productivity",
+    "capabilities": [],
+    "brandColor": "#76E3D7",
+    "defaultPrompt": ["Use mcx to delegate a focused task to a Codex worker."]
+  }
+}

@@ -1,0 +1,5 @@
+interface:
+  display_name: "mcx"
+  short_description: "Run independent background Codex workers"
+  brand_color: "#76E3D7"
+  default_prompt: "Use $mcx to delegate a focused task to a Codex worker."

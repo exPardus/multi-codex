@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Package native Codex and Claude Code plugins with one shared mcx skill and hook.
+- Add `install.py` targets for either app, both apps, or PATH commands only.
+- Migrate the legacy global hook after successful plugin installation.
+- Keep startup context brief and load detailed guidance through the skill on demand.
+- Request concise worker results with verification evidence and blockers.
+
 - Allow workers to use native Codex subagents while blocking independent worker
   launches. Native subagents default to the worker's model and reasoning effort.
 - Install `mcx` and `multicodex` on PATH alongside the Codex startup hook.

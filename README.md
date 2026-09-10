@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Give a Codex session independent background workers through its own shell.</strong><br>
+  <strong>Give Codex and Claude Code independent Codex workers through the shell.</strong><br>
   One Bash executable. Five commands. Plain files. No daemon.
 </p>
 
@@ -26,7 +26,7 @@
 
 ## Why multi-codex?
 
-A coordinating Codex session can hand off a focused task, keep working, and collect
+A coordinating Codex or Claude Code session can hand off a focused task, keep working, and collect
 an answer later. Each worker is an independent `codex exec` process, outside the
 coordinator's native subagent pool. Workers start fresh and exit when finished.
 
@@ -46,12 +46,12 @@ apply.
 
 You need **Bash 3.2+**, an installed and authenticated **Codex CLI**, and standard
 Unix utilities. Python 3 is used only for installation and tests. The current
-integration was verified with Codex CLI **0.153.4**.
+integration was verified with Codex CLI **0.153.4** and Claude Code **2.1.267**.
 
 ```sh
 git clone https://github.com/exPardus/multi-codex.git
 cd multi-codex
-python3 install-codex.py
+python3 install.py both
 
 # From any project directory:
 cd /path/to/your/project
@@ -60,21 +60,53 @@ mcx list
 mcx result "$id"
 ```
 
-The installer links **`mcx`** and **`multicodex`** into `~/.local/bin` and registers
-the Codex startup hook. Both names run the same program. If that directory is not
-on PATH, the installer prints the line to add to your shell configuration:
+The installer links **`mcx`** and **`multicodex`** into `~/.local/bin` and installs
+the native plugin for both apps using their own plugin CLIs. Both command names
+run the same Bash program. Choose just what you need:
+
+| Install | Command |
+| --- | --- |
+| Both apps + PATH commands | `python3 install.py both` |
+| Codex + PATH commands | `python3 install.py codex` |
+| Claude Code + PATH commands | `python3 install.py claude` |
+| PATH commands only | `python3 install.py cli` |
+
+If the bin directory is not on PATH, add this to your shell configuration:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Open `/hooks` in Codex and trust **Loading multi-codex context** once. New local
-sessions will know how to use the helper. The launcher also works immediately
-without the optional hook: `./mcx --help`.
+In Codex, open `/hooks` and trust **Loading multi-codex context** once. Start a new
+session in each app to load the skill and startup context. Invoke **`$mcx`** in
+Codex or **`/multi-codex:mcx`** in Claude Code, or simply ask for background Codex
+workers. Claude Code uses your existing Codex login to run the workers.
 
-> **Keep the checkout.** Installed commands are symlinks to it, so `git pull`
-> updates them. Use `MCX_BIN_DIR=/your/bin python3 install-codex.py` for a different
-> installation directory. Existing unrelated commands are never overwritten.
+> **Keep the checkout.** PATH commands are symlinks to it. Use
+> `MCX_BIN_DIR=/your/bin python3 install.py both` for a different bin directory.
+> Existing unrelated commands are never overwritten. `install-codex.py` remains
+> an alias for the Codex installer.
+
+### Install through plugin marketplaces
+
+The public repository is a marketplace for both apps. You can install the plugin
+without the Python installer:
+
+```sh
+# Codex
+codex plugin marketplace add exPardus/multi-codex
+codex plugin add multi-codex@multi-codex
+
+# Claude Code
+claude plugin marketplace add exPardus/multi-codex
+claude plugin install multi-codex@multi-codex --scope user
+```
+
+The plugin bundles the executable, skill, and startup hook. Its hook supplies an
+absolute launcher path when `mcx` is absent from PATH. For the short shell command
+everywhere, clone the repo and run `python3 install.py cli`. A standalone skill is
+also available at [`plugins/multi-codex/skills/mcx`](plugins/multi-codex/skills/mcx);
+the plugin is the complete installation, including automatic startup context.
 
 ## Five commands
 
@@ -96,7 +128,7 @@ mcx steer "$id" - < correction.md
 ### A small parallel workflow
 
 Assign separate files or independent review tasks when workers share a workspace.
-These are ordinary shell commands a coordinating Codex session can run:
+These are ordinary shell commands either coordinating assistant can run:
 
 ```sh
 auth=$(mcx spawn "Review src/auth. Return concrete bugs and locations; do not edit.")
@@ -147,15 +179,15 @@ for model capabilities and availability.
 
 ## Codex knows its role
 
-The global `SessionStart` hook adds a short, role-specific instruction:
+The plugin’s `SessionStart` hook adds a short, role-specific instruction in both apps:
 
 | Session | Startup context |
 | --- | --- |
 | **Coordinator** | How to call `mcx`, provide complete task context, collect results, and choose an appropriate model. |
 | **Worker** | Complete the assigned task, using native Codex subagents if useful. Collect their results, close them, and finish. Do not launch independent workers. |
 
-The hook runs on startup, resume, clear, and compaction. Worker rules are also
-included in every worker input, so they remain present without the global hook.
+The hook runs at session start, including resume, clear, compaction, and Claude forks. Worker rules are also
+included in every worker input, so they remain present without the plugin hook.
 `MCX_WORKER=1` is exported and explicitly set in Codex's shell environment;
 `spawn` and `steer` reject calls from workers and their subagents. Native Codex
 subagents are enabled, with the normal Codex session limits. The worker's role
@@ -168,21 +200,39 @@ configuration and project instructions, including `AGENTS.md`.
 <details>
 <summary><strong>Hook installation, updates, and removal</strong></summary>
 
-The installer registers `mcx _context` in `$CODEX_HOME/hooks.json`, normally
-`~/.codex/hooks.json`, while preserving unrelated hooks. It uses an absolute path
-for the hook itself so startup does not depend on shell PATH initialization.
-The injected usage instructions prefer the short `mcx` command.
+Both manifests share `hooks/hooks.json` and one `mcx` skill. The startup hook emits
+only role, discovery, and model essentials; detailed instructions load when the
+skill is used. See [context design and official sources](docs/context-design.md).
 
-Codex requires trusting the specific hook definition through `/hooks`; the tool
-never bypasses that review. Existing clients may need a restart. Other machines
-and different `CODEX_HOME` directories need their own installation.
+Codex requires trusting the specific hook definition through `/hooks`. The
+installer migrates the earlier global hook after successful plugin installation,
+preserving unrelated hooks and backing up changes as `hooks.json.mcx-backup`.
+It honors `CODEX_HOME`, and Claude Code honors `CLAUDE_CONFIG_DIR` through its CLI.
 
-If you move the checkout, remove its old command symlinks, rerun the installer,
-and trust the updated hook. To uninstall, remove the `mcx` and `multicodex`
-symlinks and the **Loading multi-codex context** entry from `hooks.json`.
-An existing hooks file is backed up as `hooks.json.mcx-backup` when changed.
+For checkout installations, `git pull` updates PATH commands immediately. Reinstall
+Codex with `codex plugin add multi-codex@multi-codex` and refresh Claude Code with
+`claude plugin update multi-codex@multi-codex` after a release. For GitHub marketplace
+installations, update the marketplace snapshot first:
 
-See the [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
+```sh
+codex plugin marketplace upgrade multi-codex
+codex plugin add multi-codex@multi-codex
+claude plugin marketplace update multi-codex
+claude plugin update multi-codex@multi-codex
+```
+
+Restart sessions after plugin updates and review any changed Codex hook. For local
+plugin development, see [Contributing](CONTRIBUTING.md).
+
+To uninstall plugins:
+
+```sh
+codex plugin remove multi-codex@multi-codex
+claude plugin uninstall multi-codex@multi-codex
+```
+
+Remove your `mcx` and `multicodex` symlinks separately if you also want to remove
+the PATH commands. Job files stay in each project’s `.mcx/` until you delete them.
 
 </details>
 
@@ -190,7 +240,7 @@ See the [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
 ```mermaid
 flowchart LR
-    A["Your shell or coordinating Codex"] -->|"spawn · task + context"| B["mcx"]
+    A["Your shell, Codex, or Claude Code"] -->|"spawn · task + context"| B["mcx"]
     B --> C["Independent codex exec"]
     C -->|"writes answer, then exits"| D[".mcx / job ID"]
     A -->|"result"| D
@@ -242,7 +292,7 @@ python3 -m unittest discover -s tests -v
 The offline tests exercise real process lifecycles using a fake Codex, plus
 installation and hook preservation. CI runs on **Linux and macOS** with no
 credentials or model calls. Real Codex smoke checks have also covered spawning,
-steering, global startup context, and recursion prevention.
+steering, startup context in both apps, and recursion prevention.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project conventions and
 [CHANGELOG.md](CHANGELOG.md) for changes.

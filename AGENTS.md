@@ -1,7 +1,7 @@
 # Project conventions
 
 Keep the runtime small: one Bash 3.2-compatible executable, plain files, and no
-daemon or package dependencies. The optional Codex hook installer may use Python's
+daemon or package dependencies. The optional plugin installer may use Python's
 standard library. Keep the public command set to spawn, list, result, stop, steer.
 
 Workers must start fresh, exit when done, and retain their selected model on steer.
@@ -13,3 +13,6 @@ expensive coordinator model. Keep existing user configuration intact.
 For lifecycle changes, run `bash -n mcx`, `shellcheck mcx` when available, and
 `python3 -m unittest discover -s tests -v`. Live Codex tests must use small, bounded
 prompts. Do not commit job logs, session IDs, authentication data, or local hooks.
+
+The canonical executable lives in plugins/multi-codex/mcx; root mcx is a symlink.
+Keep the plugin self-contained and share its skill and hooks between both apps.

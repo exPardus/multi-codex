@@ -1,0 +1,10 @@
+{
+  "name": "multi-codex",
+  "description": "Lightweight background Codex workers for both coding assistants.",
+  "owner": {"name": "exPardus"},
+  "plugins": [{
+    "name": "multi-codex",
+    "source": "./plugins/multi-codex",
+    "description": "Lightweight background Codex workers for Codex and Claude Code."
+  }]
+}

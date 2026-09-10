@@ -163,12 +163,14 @@ class Workers(unittest.TestCase):
         normal = self.run_mcx('_context')
         worker = self.run_mcx('_context', env=dict(self.env, MCX_WORKER='1'))
         self.assertIn('multi-codex helper is available as:', normal.stdout)
-        self.assertIn('Default Luna/medium', normal.stdout)
+        self.assertIn('gpt-5.6-luna/medium', normal.stdout)
         self.assertIn('WORKER, not a coordinator', worker.stdout)
         self.assertIn('may spawn native Codex subagents', worker.stdout)
-        self.assertIn('Do not launch independent worker sessions', worker.stdout)
+        self.assertIn('Do not launch independent workers', worker.stdout)
         self.assertIn('Your subagents must follow the same restriction', worker.stdout)
-        self.assertNotIn('Default Luna/medium', worker.stdout)
+        self.assertNotIn('gpt-5.6-luna/medium', worker.stdout)
+        self.assertLess(len(normal.stdout), 1000)
+        self.assertLess(len(worker.stdout), 1000)
 
     def test_stale_pid_does_not_kill_unrelated_process(self):
         worker = self.spawn()

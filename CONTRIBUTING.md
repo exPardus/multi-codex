@@ -29,6 +29,24 @@ executable and makes no model calls. GitHub Actions runs it on Linux and macOS.
 - Literal handling of prompts, including quotes, newlines, and shell syntax.
 - Existing user commands and unrelated Codex hooks during installation.
 
+## Plugin development
+
+The self-contained package is `plugins/multi-codex/`; root `mcx` is a symlink to
+its executable. Both manifests share one skill and one hook. Keep startup context
+small and put detailed usage in the skill; see [context design](docs/context-design.md).
+
+`python3 install.py both` registers this checkout with each app's plugin manager.
+Codex caches plugins by version. During local development, use the installed
+plugin-creator skill's `update_plugin_cachebuster.py plugins/multi-codex`, then
+`codex plugin add multi-codex@multi-codex`. For Claude Code, use
+`claude plugin update multi-codex@multi-codex`. Start new sessions after updating.
+Use a new shared semantic version in both manifests for a public release.
+
+Validate Claude packaging with `claude plugin validate plugins/multi-codex` and
+`claude plugin validate .`. Validate Codex packaging and the skill with the
+plugin-creator and skill-creator validators. These development tools may need
+PyYAML; the launcher and installer do not.
+
 Keep runtime dependencies out of the launcher. Process lifecycle changes need
 behavioral tests, especially around stopping, resuming, and concurrent completion.
 Use small, bounded prompts if a change needs a real Codex check, and stop any test

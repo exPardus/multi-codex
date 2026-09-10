@@ -1,0 +1,20 @@
+{
+  "name": "multi-codex",
+  "interface": {
+    "displayName": "multi-codex by exPardus"
+  },
+  "plugins": [
+    {
+      "name": "multi-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/multi-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
