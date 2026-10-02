@@ -46,20 +46,30 @@ def main(argv=None):
     parser.add_argument('target', nargs='?', default='both',
                         choices=('both', 'codex', 'claude', 'cli'),
                         help='what to install (default: both apps and PATH commands)')
-    target = parser.parse_args(argv).target
+    parser.add_argument('--repair-links', action='store_true',
+                        help='replace dangling command symlinks after moving the checkout')
+    options = parser.parse_args(argv)
+    target = options.target
     hosts = ('codex', 'claude') if target == 'both' else (() if target == 'cli' else (target,))
     bin_dir = Path(os.environ.get('MCX_BIN_DIR', Path.home() / '.local/bin')).expanduser().absolute()
     links = [bin_dir / name for name in ('mcx', 'multicodex')]
+    repairs = []
     for link in links:
         if link.exists() or link.is_symlink():
             if not link.is_symlink() or link.resolve() != (REPO / 'mcx').resolve():
-                parser.error(f'Refusing to replace {link}; choose a different MCX_BIN_DIR.')
+                if options.repair_links and link.is_symlink() and not link.exists():
+                    repairs.append(link)
+                else:
+                    parser.error(f'Refusing to replace {link}; choose a different MCX_BIN_DIR. '
+                                 'For dangling symlinks after moving the checkout, use --repair-links.')
     for host in hosts:
         if not shutil.which(host):
             parser.error(f'{host} is not on PATH; install it first, or select a different target.')
     try:
         bin_dir.mkdir(parents=True, exist_ok=True)
         for link in links:
+            if link in repairs:
+                link.unlink()
             if not link.is_symlink():
                 link.symlink_to(REPO / 'mcx')
         print(f'Installed mcx and multicodex in {bin_dir}', flush=True)

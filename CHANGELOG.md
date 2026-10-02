@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- Add `install.py --repair-links` to restore dangling `mcx` and `multicodex`
+  command symlinks after moving a checkout. Existing files and working symlinks
+  remain protected.
+- Document launcher sandbox errors and the host approval flow needed for worker
+  startup and process inspection.
+- Cover link repair, repeated installation, and existing-command preservation
+  with regression tests.
+
 ## 0.2.0
 
 - Add `spawn --wait` and `steer --wait` for harness-managed background commands.

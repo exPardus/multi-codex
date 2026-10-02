@@ -106,6 +106,46 @@ if os.environ.get('MCX_TEST_FAIL') and sys.argv[2] in ('add', 'install'):
         self.assertEqual(existing.read_text(), 'a different program')
         self.assertFalse(self.calls.exists())
 
+    def test_repair_links_after_checkout_moves(self):
+        self.bin.mkdir()
+        old_target = self.root / 'old checkout/mcx'
+        for name in ('mcx', 'multicodex'):
+            (self.bin / name).symlink_to(old_target)
+        result = self.install('cli')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--repair-links', result.stderr)
+        self.assertEqual((self.bin / 'mcx').readlink(), old_target)
+        for _ in range(2):
+            result = self.install('cli', '--repair-links')
+            self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ('mcx', 'multicodex'):
+            self.assertEqual((self.bin / name).resolve(), (REPO / 'mcx').resolve())
+            result = subprocess.run([name, '--help'], cwd=self.root, env=self.env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.calls.exists())
+
+    def test_repair_links_preserves_existing_commands_and_valid_symlinks(self):
+        self.bin.mkdir()
+        other = self.root / 'other program'
+        other.write_text('a different program')
+        first = self.bin / 'mcx'
+        first.symlink_to(self.root / 'old checkout/mcx')
+        second = self.bin / 'multicodex'
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink):
+                if symlink:
+                    second.symlink_to(other)
+                else:
+                    second.write_text('existing command')
+                result = self.install('cli', '--repair-links')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Refusing to replace', result.stderr)
+                self.assertEqual(first.readlink(), self.root / 'old checkout/mcx')
+                self.assertEqual(second.read_text(), 'a different program' if symlink else 'existing command')
+                second.unlink()
+        self.assertFalse(self.calls.exists())
+
     def test_hook_survives_plugin_cache_relocation_without_path_install(self):
         cached = self.root / 'cached plugin'
         shutil.copytree(PLUGIN, cached)

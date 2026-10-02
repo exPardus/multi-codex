@@ -88,6 +88,10 @@ workers. Claude Code uses your existing Codex login to run the workers.
 > Existing unrelated commands are never overwritten. `install-codex.py` remains
 > an alias for the Codex installer.
 
+If you move the checkout and `mcx` becomes unavailable, run
+`python3 install.py cli --repair-links` from its new location. This replaces
+dangling command symlinks while preserving existing files and working symlinks.
+
 ### Install through plugin marketplaces
 
 The public repository is a marketplace for both apps. You can install the plugin
@@ -309,6 +313,12 @@ and approval policy `never` by default. The approval setting can opt into automa
 review or unrestricted execution. `--wait` adds a waiting launcher that exits
 with its child; it needs no polling loop or daemon. The launching environment must permit running Codex.
 There is no automatic retry, worktree creation, or file merge handling.
+
+If a worker fails at startup with `failed to initialize in-process app-server
+client: Operation not permitted`, or stop/steer reports `process inspection
+denied`, the launching shell may be sandboxed. Use your host's approval flow to
+run the launcher with the required access. Keep the selected worker approval
+mode; changing it cannot grant permissions denied to the launcher.
 
 ### Plain files, easy inspection
 
